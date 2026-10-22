@@ -1,6 +1,6 @@
-import { expect, test } from 'claude-code/testing'
+import { expect, mock, test } from 'claude-code/testing'
 
-import { bar, resetText } from './hooks/register'
+import { bar, fromOauth, resetText } from './hooks/register'
 import { usageSvg } from './hooks/svg'
 
 test('bar and reset text', async () => {
@@ -99,4 +99,55 @@ test('a new session shows the last reading until its reset passes', async ($, on
   // 5h reset at 12:13, it is 13:00 now: hidden.
   expect(await ui.find({ type: 'Text', text: /^5h/ })).toBeUndefined()
   await ui.unmount()
+})
+
+test('oauth usage body: both windows, null reset dropped, junk ignored', async () => {
+  expect(
+    fromOauth({
+      five_hour: { utilization: 0.0, resets_at: null },
+      seven_day: { utilization: 3.04, resets_at: '2026-10-29T07:00:00+00:00' },
+      seven_day_opus: null,
+    }),
+  ).toEqual([
+    { kind: 'five_hour', percentUsed: 0, resetsAt: undefined },
+    { kind: 'seven_day', percentUsed: 3, resetsAt: '2026-10-29T07:00:00+00:00' },
+  ])
+  expect(fromOauth(null)).toEqual([])
+  expect(fromOauth({ five_hour: { utilization: 'x' } })).toEqual([])
+})
+
+test('a new session polls the account endpoint with its own credential', async ($, on) => {
+  const asked: { url: string; auth?: string; beta?: string }[] = []
+  const clock = mock.clock(on, { now: Date.parse('2026-10-22T10:00:00Z') })
+  mock.store(on)
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }) as any)
+  on('session.authorize', () => ({ value: { handle: 'h1', kind: 'bearer' } }) as any)
+  on('http.fetch', (_, e: any) => {
+    asked.push({ url: e.url, auth: e.init?.auth, beta: e.init?.headers?.['anthropic-beta'] })
+    const body = { five_hour: { utilization: 12, resets_at: '2026-10-22T12:00:00Z' }, seven_day: { utilization: 3, resets_at: '2026-10-29T07:00:00Z' } }
+    return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify(body) } } as any
+  })
+  on('ui.render', ($, e) => {
+    const { Text } = $.ui.resolve(e)
+    return <Text>below</Text>
+  })
+
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await clock.advance(0)
+  await clock.advance(60_000) // inside the period: no second fetch
+
+  expect(asked).toEqual([{ url: 'https://api.anthropic.com/api/oauth/usage', auth: 'h1', beta: 'oauth-2025-04-20' }])
+  const ui = await $.ui.mount({
+    plugin: 'usage-limits',
+    component: 'AbovePrompt',
+    surface: 'terminal',
+    props: { hasSurvey: false, isWorking: false, bodyColumns: 100 } as any,
+  })
+  expect((await ui.find({ type: 'Text', text: /^5h/ }))?.text).toMatch(/12%/)
+  expect((await ui.find({ type: 'Text', text: /^weekly/ }))?.text).toMatch(/3%/)
+  await ui.unmount()
+
+  await clock.advance(60_000) // two minutes in: the next poll
+  expect(asked.length).toBe(2)
 })

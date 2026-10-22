@@ -6,6 +6,8 @@ A Claude Code mod that shows your 5-hour and weekly usage limits in a row above 
 5h  ━━──────  9%  resets Oct 22, 15:40 · 1h11m left  │  weekly  ─────────  1%  resets Oct 22, 21:00 · 6h31m left
 ```
 
+- The figures are account-wide and stay fresh while you are idle: every 2 minutes the mod asks Anthropic's usage endpoint (the one the app's own "Plan usage limits" panel reflects), once for all your open sessions, and after each reply it also takes the engine's own reading.
+- The session's own login is used through the engine (`$.session.authorize`): the token never reaches the mod, and nothing is read from the Keychain. If the endpoint is unreachable or changes (it is undocumented), the row falls back to the engine's readings.
 - The bar turns yellow at 70% and red at 90%.
 - In the Claude desktop app it is drawn as a crisp SVG row; in a terminal, as a text bar.
 - A new session shows the last known reading right away (the engine only learns the limits after the first reply); a window whose reset time has passed is hidden until the next reading.

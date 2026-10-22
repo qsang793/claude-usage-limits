@@ -52,11 +52,52 @@ const save = async ($: EngineInterface, next: Limit[]) => {
   if (ls.length > 0) await $.store.set('limits', ls)
 }
 
+// The engine's figures only move when this session calls the API; this endpoint is account-wide, like the app's own panel.
+// shortcut: undocumented endpoint (CCometixLine and others poll it); if it changes, the engine's rateLimits remain.
+const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
+const POLL_MS = 120_000
+
+// `utilization` is already 0-100; `resets_at` is null while a window is unused.
+export const fromOauth = (body: unknown): Limit[] =>
+  ['five_hour', 'seven_day'].flatMap(kind => {
+    const w = (body as Record<string, { utilization?: unknown; resets_at?: unknown } | null> | null)?.[kind]
+    if (!w || typeof w.utilization !== 'number') return []
+    const resetsAt = typeof w.resets_at === 'string' ? w.resets_at : undefined
+    return [{ kind, percentUsed: Math.round(w.utilization * 10) / 10, resetsAt }]
+  })
+
+let polling = false
+const poll = async ($: EngineInterface) => {
+  const now = await $.clock.now()
+  // One fetch per period across all sessions; the others take what it stored.
+  if (polling || now - (((await $.store.get('fetchedAt')) as number | undefined) ?? 0) < POLL_MS) {
+    const shared = (await $.store.get('limits')) as Limit[] | undefined
+    if (shared?.length) await update($, limits, () => shared)
+    return
+  }
+  polling = true
+  try {
+    await $.store.set('fetchedAt', now)
+    // The engine sets the session's own credential header; the token never reaches this module.
+    const auth = await $.session.authorize()
+    if (auth?.kind !== 'bearer') return
+    const r = await $.http.fetch(USAGE_URL, { auth: auth.handle, headers: { 'anthropic-beta': 'oauth-2025-04-20' } })
+    const ls = r.ok ? fromOauth(JSON.parse(r.text)) : []
+    if (ls.length > 0) await save($, ls)
+  } catch {
+    // Offline or the endpoint changed: the engine's figures stay.
+  } finally {
+    polling = false
+  }
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const r = await next(e)
     const fresh = await $.session.usage().then(u => u.rateLimits, () => [])
     if (fresh.length > 0) await save($, fresh)
+    $.clock.after(0, () => void poll($))
+    $.clock.every(POLL_MS, () => void poll($))
     return r
   }).catch(($, e, next) => next(e))
 

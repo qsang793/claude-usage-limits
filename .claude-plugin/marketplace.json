@@ -1,0 +1,13 @@
+{
+  "name": "usage-limits",
+  "description": "The usage-limits mod for Claude Code: 5-hour and weekly usage bars with reset times above the prompt",
+  "owner": {
+    "name": "qsang793"
+  },
+  "plugins": [
+    {
+      "name": "usage-limits",
+      "source": "./"
+    }
+  ]
+}

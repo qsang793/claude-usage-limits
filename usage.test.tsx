@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import { bar, fromOauth, resetText } from './hooks/register'
-import { usageSvg } from './hooks/svg'
+import { elapsed, usageSvg } from './hooks/svg'
 
 test('bar and reset text', async () => {
   expect(bar(42)).toBe('████░░░░░░')
@@ -32,6 +32,19 @@ test('svg row: neutral under 70%, warning and error above, escaped names', async
   expect(svg).toContain('1h30m · 15:40')
   expect(svg).toContain('&lt;x&gt;')
   expect(svg).not.toContain('<x>')
+})
+
+test('pace tick: share of the window gone by, none outside it or for unknown windows', async () => {
+  const now = Date.parse('2026-10-22T10:00:00Z')
+  const l = (kind: string, resetsAt?: string) => ({ kind, percentUsed: 50, resetsAt })
+  expect(elapsed(l('five_hour', '2026-10-22T11:00:00Z'), now)).toBe(0.8)
+  expect(Math.round(elapsed(l('seven_day', '2026-10-25T10:00:00Z'), now)! * 700)).toBe(400)
+  expect(elapsed(l('five_hour', '2026-10-22T09:00:00Z'), now)).toBeUndefined()
+  expect(elapsed(l('five_hour'), now)).toBeUndefined()
+  expect(elapsed(l('other', '2026-10-22T11:00:00Z'), now)).toBeUndefined()
+  const names = { five_hour: '5h' }
+  expect(usageSvg([l('five_hour', '2026-10-22T11:00:00Z')], names, () => 'r', now)).toContain('class="k"')
+  expect(usageSvg([l('five_hour', '2026-10-22T11:00:00Z')], names, () => 'r')).not.toContain('class="k"')
 })
 
 test('the band shows both windows under the bands beneath', async ($, on) => {

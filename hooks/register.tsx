@@ -124,7 +124,7 @@ export const register: Register = on => {
     const mine =
       Svg ? (
         <Svg
-          source={usageSvg(ls, NAMES, iso => resetText(iso, now, lang))}
+          source={usageSvg(ls, NAMES, iso => resetText(iso, now, lang), now)}
           alt={ls.map(l => `${NAMES[l.kind]} ${l.percentUsed}%`).join(', ')}
         />
       ) : (

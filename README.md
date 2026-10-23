@@ -49,3 +49,12 @@ claude plugin uninstall usage-limits
 ## Develop
 
 `claude plugin validate .` checks the mod, `claude plugin test .` runs `usage.test.tsx`.
+
+To run a checkout as your mod, so a `git pull` is the whole update on every machine:
+
+```bash
+git clone https://github.com/qsang793/claude-usage-limits.git ~/claude-usage-limits
+ln -s ~/claude-usage-limits ~/.claude/mods/usage-limits
+```
+
+Sessions started afterwards load the new code; one already open picks it up with `/reload-plugins`.

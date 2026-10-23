@@ -16,7 +16,7 @@ export type CacheCell = { label: string; remaining: number; value: string; detai
 // ponytail's buttons inset their text by about this much: the "● full" dot starts here, not at 0.
 const INSET = 6
 // A 12px system-font letter's width on average; SVG text cannot be measured when the string is built.
-const CHAR = 5.7
+const CHAR = 6.7
 const TRACK = 48
 
 // How long each window lasts, to place the pace tick: how much of the window has gone by.
@@ -28,10 +28,27 @@ export const elapsed = (l: Limit, now: number) => {
   return f > 0 && f < 1 ? f : undefined
 }
 
-// What a text run takes at 12px, as measured: digits are 6.9 wide in either weight, spaces and stops about 2.6, "%" 10.
-const NARROW = ' .,:·'
-const textW = (s: string) =>
-  [...s].reduce((w, ch) => w + (ch >= '0' && ch <= '9' ? 6.9 : NARROW.includes(ch) ? 2.6 : ch === '%' ? 10 : CHAR), 0)
+// What a text run takes: 12px -apple-system glyphs as Chromium (the desktop app's renderer) draws them, grouped by width.
+// The 600 weight runs about 5% wider.
+const textW = (s: string, bold = false) =>
+  [...s].reduce(
+    (w, ch) =>
+      w +
+      (' .,:;·!|ijlI'.includes(ch)
+        ? 3.4
+        : 'frt()[]/'.includes(ch)
+          ? 4.5
+          : ch === '1'
+            ? 5.6
+            : 'mwMW%@…'.includes(ch)
+              ? 10.5
+              : ch >= 'A' && ch <= 'Z'
+                ? 8.2
+                : ch >= '0' && ch <= '9'
+                  ? 7.4
+                  : CHAR),
+    0,
+  ) * (bold ? 1.05 : 1)
 
 // Either side of a divider: every column ends the same distance before it and starts the same distance after.
 const GAP = 14
@@ -51,9 +68,9 @@ export function usageSvg(
   const height = 20
   const cols = ls.map(l => ({ l, name: names[l.kind] ?? l.kind, pct: `${l.percentUsed}%`, reset: l.resetsAt ? reset(l.resetsAt) : '' }))
   const colW = (c: (typeof cols)[number]) =>
-    Math.ceil(textW(c.name)) + 8 + TRACK + 6 + textW(c.pct) + (c.reset ? 6 + textW(c.reset) : 0)
+    Math.ceil(textW(c.name)) + 8 + TRACK + 8 + textW(c.pct, true) + (c.reset ? 6 + textW(c.reset) : 0)
   const cacheW = cache
-    ? 2 * RING_R + 6 + textW(cache.label) + 6 + textW(cache.value) + (cache.detail ? 6 + textW(`· ${cache.detail}`) : 0)
+    ? 2 * RING_R + 6 + textW(cache.label) + 6 + textW(cache.value, true) + (cache.detail ? 6 + textW(`· ${cache.detail}`) : 0)
     : 0
   const dividers = cols.length - 1 + (cache && cols.length > 0 ? 1 : 0)
   const over = INSET + cols.reduce((w, c) => w + colW(c), 0) + dividers * 2 * GAP + cacheW - width
@@ -63,7 +80,7 @@ export function usageSvg(
   let body = ''
   let x = INSET
   const divide = () => {
-    body += `<line class="d" x1="${x + GAP}" y1="2" x2="${x + GAP}" y2="${height - 2}"/>`
+    body += `<line class="d" x1="${(x + GAP).toFixed(1)}" y1="2" x2="${(x + GAP).toFixed(1)}" y2="${height - 2}"/>`
     x += 2 * GAP
   }
   cols.forEach((c, i) => {
@@ -77,10 +94,11 @@ export function usageSvg(
     // Where usage would be at an even pace: fill past the tick means faster than the window allows.
     const f = now === undefined ? undefined : elapsed(c.l, now)
     if (f !== undefined) body += `<rect class="k" x="${(bar + f * TRACK - 0.5).toFixed(1)}" y="5" width="1" height="10"/>`
-    // Percent and reset in one text run, so the reset follows the percent whatever its width.
-    const rest = c.reset ? `<tspan class="s" dx="6">${esc(c.reset)}</tspan>` : ''
-    body += `<text x="${bar + TRACK + 6}" y="14"><tspan class="p">${c.pct}</tspan>${rest}</text>`
+    // Percent and reset in one text run, its end pinned to the column's: the gap before a divider holds whatever the font,
+    // and an estimate that is off moves only the space between track and percent.
     x += colW(c)
+    const rest = c.reset ? `<tspan class="s" dx="6">${esc(c.reset)}</tspan>` : ''
+    body += `<text x="${x.toFixed(1)}" y="14" text-anchor="end"><tspan class="p">${c.pct}</tspan>${rest}</text>`
   })
   if (cache) {
     if (cols.length > 0) divide()

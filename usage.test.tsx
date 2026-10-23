@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { bar, fromOauth, resetText } from './hooks/register'
+import { bar, cacheCell, fromOauth, kTokens, resetText, ring } from './hooks/register'
 import { elapsed, usageSvg } from './hooks/svg'
 
 test('bar and reset text', async () => {
@@ -9,10 +9,12 @@ test('bar and reset text', async () => {
   // Local times, so the test holds in any time zone.
   const local = (d: number, h: number, m: number) => new Date(2026, 9, d, h, m).toISOString()
   const at10 = new Date(2026, 9, 22, 10, 0).getTime()
-  expect(resetText(local(22, 12, 13), at10, 'en-US')).toBe('resets Oct 22, 12:13 · 2h13m left')
-  expect(resetText(local(25, 14, 0), at10, 'en-US')).toBe('resets Oct 25, 14:00 · 3d4h left')
-  expect(resetText(local(22, 9, 0), at10)).toBe('resets Oct 22, 09:00 · 0h00m left')
-  expect(resetText(local(22, 21, 0), at10, 'vi-VN')).toMatch(/^reset 22 .*10, 21:00 · còn 11h00m$/)
+  // Today's reset needs no date; another day's does.
+  expect(resetText(local(22, 12, 13), at10, 'en-US')).toBe('12:13 · 2h13m')
+  expect(resetText(local(25, 14, 0), at10, 'en-US')).toBe('Oct 25, 14:00 · 3d4h')
+  expect(resetText(local(22, 9, 0), at10)).toBe('09:00 · 0h00m')
+  expect(resetText(local(23, 2, 0), at10, 'en-US')).toBe('Oct 23, 02:00 · 16h00m')
+  expect(resetText(local(25, 21, 0), at10, 'vi-VN')).toMatch(/^25 .*10, 21:00 · 3d11h$/)
 })
 
 test('svg row: neutral under 70%, warning and error above, escaped names', async () => {
@@ -32,6 +34,80 @@ test('svg row: neutral under 70%, warning and error above, escaped names', async
   expect(svg).toContain('1h30m · 15:40')
   expect(svg).toContain('&lt;x&gt;')
   expect(svg).not.toContain('<x>')
+})
+
+test('cache cell: minutes left, yellow near the end of the TTL, red once expired', async () => {
+  const at = Date.parse('2026-10-22T10:00:00Z')
+  const H = 3_600_000
+  const c = { at, tokens: 148_400 }
+  expect(cacheCell(c, H, at + 18 * 60_000)).toEqual({ label: 'cache', remaining: 0.7, value: '42m', detail: '148k', tone: undefined })
+  expect(cacheCell(c, H, at + 50 * 60_000 + 1).tone).toBe('warning')
+  expect(cacheCell(c, H, at + H)).toEqual({ label: 'cache', remaining: 0, value: 'expired', detail: '148k', tone: 'error' })
+  expect(cacheCell(c, H, at + H, 'vi-VN')).toMatchObject({ label: 'bộ đệm', value: 'hết hạn' })
+  // A 5-minute TTL warns in its last minute only.
+  expect(cacheCell(c, 300_000, at + 3 * 60_000).tone).toBeUndefined()
+  const last = cacheCell(c, 300_000, at + 4 * 60_000 + 1)
+  expect([last.value, last.tone]).toEqual(['1m', 'warning'])
+  expect([ring(0), ring(0.1), ring(0.5), ring(0.7), ring(1)].join('')).toBe('○◔◑◕●')
+  expect(cacheCell({ at }, H, at).detail).toBeUndefined()
+  expect(kTokens(1_250_000)).toBe('1.3M')
+  const svg = usageSvg([], {}, () => '', at, { label: 'cache', remaining: 0.5, value: '42m', detail: '148k', tone: 'warning' })
+  expect(svg).toContain('class="p warning"')
+  expect(svg).toContain('class="r r-warning"')
+  expect(usageSvg([], {}, () => '', at, { label: 'cache', remaining: 0, value: 'expired', tone: 'error' })).not.toContain('class="r ')
+  expect(svg).toContain('· 148k')
+})
+
+test('the main conversation turn starts the cache countdown; a subagent turn does not', async ($, on) => {
+  const clock = mock.clock(on, { now: Date.parse('2026-10-22T10:00:00Z') })
+  mock.store(on)
+  on('env.get', (_, e: any) => ({ value: e.name === 'HOME' ? '/nohome' : undefined }) as any)
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000, tokens: 148_400 }, rateLimits: [] } }) as any)
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  on('turn.complete', () => ({ text: '' }))
+  on('ui.render', ($, e) => {
+    const { Text } = $.ui.resolve(e)
+    return <Text>below</Text>
+  })
+  await $.session.measure({
+    context: { window: 200000 },
+    rateLimits: [{ kind: 'five_hour', percentUsed: 42, resetsAt: '2026-10-22T12:13:00Z' }],
+    changed: ['rateLimits'],
+  } as any)
+  const usage = { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 148_000, cache_creation_input_tokens: 400, model: 'm' }
+  const mount = () =>
+    $.ui.mount({
+      plugin: 'usage-limits',
+      component: 'AbovePrompt',
+      surface: 'terminal',
+      props: { hasSurvey: false, isWorking: false, bodyColumns: 100 } as any,
+    })
+
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 's', agentId: 'sub', reason: 'answer', usage } as any)
+  let ui = await mount()
+  expect(await ui.find({ type: 'Text', text: /cache/ })).toBeUndefined()
+  await ui.unmount()
+
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer', usage } as any)
+  await clock.advance(18 * 60_000)
+  ui = await mount()
+  expect((await ui.find({ type: 'Text', text: /cache/ }))?.text).toBe('◕ cache 42m · 148k')
+  await ui.unmount()
+})
+
+test('svg row: a row too long for its width cuts the last reset, not the cache', async () => {
+  const names = { a: '5h', b: 'weekly' }
+  const long = 'x'.repeat(200)
+  const svg = usageSvg(
+    [{ kind: 'a', percentUsed: 8, resetsAt: 'r' }, { kind: 'b', percentUsed: 75, resetsAt: 'r' }],
+    names,
+    () => long,
+    undefined,
+    { label: 'cache', remaining: 0.5, value: '42m', detail: '148k' },
+  )
+  expect(svg).toContain('…')
+  expect(svg).toContain('· 148k')
+  expect(svg.split(long).length).toBe(2) // the first reset stays whole
 })
 
 test('pace tick: share of the window gone by, none outside it or for unknown windows', async () => {

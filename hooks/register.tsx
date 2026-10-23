@@ -1,18 +1,59 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Limit } from '../types'
-import { tone, usageSvg } from './svg'
+import type { Cache, Limit } from '../types'
+import { type CacheCell, tone, usageSvg } from './svg'
 
 const limits = atom({ plugin: 'usage-limits', key: 'limits' } as const, [] as Limit[])
+// When the main conversation last called the API, and how much context it sent: per session, like the cache itself.
+const cache = atom({ plugin: 'usage-limits', key: 'cache' } as const, null as Cache | null)
 
 const NAMES: Record<string, string> = { five_hour: '5h', seven_day: 'weekly' }
 const pad = (n: number) => String(n).padStart(2, '0')
 
-// The words around the date; the date itself comes from Intl in the app's locale.
-type Words = { reset: string; left: (t: string) => string }
-const EN: Words = { reset: 'resets', left: t => `${t} left` }
-const WORDS: Record<string, Words> = { en: EN, vi: { reset: 'reset', left: t => `còn ${t}` } }
+// The cache column's words; dates come from Intl in the app's locale.
+type Words = { cache: string; expired: string }
+const EN: Words = { cache: 'cache', expired: 'expired' }
+const WORDS: Record<string, Words> = { en: EN, vi: { cache: 'bộ đệm', expired: 'hết hạn' } }
+
+const MIN = 60_000
+const HOUR = 60 * MIN
+
+// The main conversation's cache TTL, in the order Claude Code applies its controls; a subscription within plan usage gets 1h.
+// shortcut: user settings only (not project or managed ones), and a subscription's drop to 5m on usage credits is missed; read it from the engine if it ever exposes one.
+let ttl: Promise<number> | undefined
+const cacheTtl = ($: EngineInterface) =>
+  (ttl ??= (async () => {
+    const pick = (v: unknown) => (v === '5m' ? 5 * MIN : v === '1h' ? HOUR : undefined)
+    if ((await $.env.get('FORCE_PROMPT_CACHING_5M')) === '1') return 5 * MIN
+    const fromEnv = pick(await $.env.get('CLAUDE_CODE_PROMPT_CACHE_TTL'))
+    if (fromEnv) return fromEnv
+    try {
+      const settings = JSON.parse(await $.fs.read(`${await $.env.get('HOME')}/.claude/settings.json`))
+      return pick(settings.promptCacheTtl) ?? HOUR
+    } catch {
+      return HOUR
+    }
+  })())
+
+// The terminal's ring: a circle filled by the share of the TTL left.
+export const ring = (remaining: number) => '○◔◑◕●'[Math.ceil(remaining * 4)]
+
+export const kTokens = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : `${Math.round(n / 1000)}k`)
+
+// "42m · 148k" while warm; yellow in the last 10 minutes of a 1h TTL (the last minute of 5m), red once expired.
+export const cacheCell = (c: Cache, ttlMs: number, now: number, lang = 'en-US'): CacheCell => {
+  const left = c.at + ttlMs - now
+  const warn = ttlMs > 5 * MIN ? 10 * MIN : MIN
+  const words = WORDS[lang.slice(0, 2)] ?? EN
+  return {
+    label: words.cache,
+    remaining: Math.min(Math.max(left / ttlMs, 0), 1),
+    value: left > 0 ? `${Math.ceil(left / MIN)}m` : words.expired,
+    detail: c.tokens ? kTokens(c.tokens) : undefined,
+    tone: left <= 0 ? 'error' : left <= warn ? 'warning' : undefined,
+  }
+}
 
 // The Claude app's language (Settings → Language), which the engine does not pass to mods.
 // shortcut: read once per load from the macOS app's config.json; a language switch shows after the next session, other OSes get en-US.
@@ -32,17 +73,18 @@ export const bar = (pct: number, width = 10) => {
   return '█'.repeat(full) + '░'.repeat(width - full)
 }
 
-// The reset's local date and time, then what is left: "resets Oct 22, 21:00 · 6h31m left" in en-US.
+// The reset's local time, its date only when not today, then what is left: "21:00 · 6h31m", "Oct 28, 21:00 · 5d6h" in en-US.
 export const resetText = (iso: string, now: number, lang = 'en-US') => {
   const at = new Date(iso)
   const mins = Math.max(0, Math.round((at.getTime() - now) / 60000))
   const d = Math.floor(mins / 1440)
   const h = Math.floor((mins % 1440) / 60)
   const left = d > 0 ? `${d}d${h}h` : `${h}h${pad(mins % 60)}m`
-  const words = WORDS[lang.slice(0, 2)] ?? EN
+  const time = `${pad(at.getHours())}:${pad(at.getMinutes())}`
+  if (at.toDateString() === new Date(now).toDateString()) return `${time} · ${left}`
   // Date and time apart: how Intl joins them ("Oct 22 at 12:13" vs "Oct 22, 12:13") changes between ICU versions.
   const date = new Intl.DateTimeFormat(lang, { day: 'numeric', month: 'short' }).format(at)
-  return `${words.reset} ${date}, ${pad(at.getHours())}:${pad(at.getMinutes())} · ${words.left(left)}`
+  return `${date}, ${time} · ${left}`
 }
 
 // Also kept across sessions: the engine has no reading until the first response, so a new session starts from the last one.
@@ -98,6 +140,8 @@ export const register: Register = on => {
     if (fresh.length > 0) await save($, fresh)
     $.clock.after(0, () => void poll($))
     $.clock.every(POLL_MS, () => void poll($))
+    // Redraw so the cache countdown moves while nothing else happens.
+    $.clock.every(30_000, () => $.ui.invalidate('ui.render'))
     return r
   }).catch(($, e, next) => next(e))
 
@@ -106,6 +150,17 @@ export const register: Register = on => {
     if (e.changed.includes('rateLimits')) await save($, e.rateLimits)
     return next(e)
   })
+
+  // The main conversation's cache only: subagents keep caches of their own, which a question here never reads.
+  on('turn.complete', async ($, e, next) => {
+    const r = await next(e)
+    if (e.agentId === undefined && e.usage) {
+      const at = await $.clock.now()
+      const tokens = await $.session.usage().then(u => u.context.tokens, () => undefined)
+      await update($, cache, () => ({ at, tokens }))
+    }
+    return r
+  }).catch(($, e, next) => next(e))
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const below = await next(e)
@@ -117,6 +172,8 @@ export const register: Register = on => {
     const ls = known.filter(l => NAMES[l.kind] && !(l.resetsAt && Date.parse(l.resetsAt) <= now))
     if (e.props.hasSurvey || ls.length === 0) return below
     const lang = await appLocale($)
+    const c = await read($, cache)
+    const cc = c ? cacheCell(c, await cacheTtl($), now, lang) : undefined
 
     const { Box, Text } = $.ui.resolve(e)
     const Svg = e.surface === 'desktop' ? $.ui.resolve(e).Svg : undefined
@@ -124,8 +181,8 @@ export const register: Register = on => {
     const mine =
       Svg ? (
         <Svg
-          source={usageSvg(ls, NAMES, iso => resetText(iso, now, lang), now)}
-          alt={ls.map(l => `${NAMES[l.kind]} ${l.percentUsed}%`).join(', ')}
+          source={usageSvg(ls, NAMES, iso => resetText(iso, now, lang), now, cc)}
+          alt={[...ls.map(l => `${NAMES[l.kind]} ${l.percentUsed}%`), ...(cc ? [`${cc.label} ${cc.value}`] : [])].join(', ')}
         />
       ) : (
         <Box flexDirection="row" gap={3} width={e.props.bodyColumns}>
@@ -138,6 +195,16 @@ export const register: Register = on => {
               {l.percentUsed}%{l.resetsAt ? <Text dimColor> · {resetText(l.resetsAt, now, lang)}</Text> : null}
             </Text>
           ))}
+          {cc ? (
+            <Text key="cache">
+              <Text color={cc.tone} dimColor={cc.tone === undefined}>
+                {ring(cc.remaining)}{' '}
+              </Text>
+              <Text dimColor>{cc.label} </Text>
+              <Text color={cc.tone}>{cc.value}</Text>
+              {cc.detail ? <Text dimColor> · {cc.detail}</Text> : null}
+            </Text>
+          ) : null}
         </Box>
       )
     return below ? (

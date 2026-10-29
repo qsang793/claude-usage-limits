@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import { bar, cacheCell, fromOauth, kTokens, resetText, ring } from './hooks/register'
-import { elapsed, usageSvg } from './hooks/svg'
+import { elapsed, ringSvg, trackSvg } from './hooks/svg'
 
 test('bar and reset text', async () => {
   expect(bar(42)).toBe('████░░░░░░')
@@ -17,23 +17,12 @@ test('bar and reset text', async () => {
   expect(resetText(local(25, 21, 0), at10, 'vi-VN')).toMatch(/^25 .*10, 21:00 · 3d11h$/)
 })
 
-test('svg row: neutral under 70%, warning and error above, escaped names', async () => {
-  const names = { a: '5h', b: 'weekly', c: '<x>' }
-  const svg = usageSvg(
-    [
-      { kind: 'a', percentUsed: 8, resetsAt: 'r' },
-      { kind: 'b', percentUsed: 75 },
-      { kind: 'c', percentUsed: 95 },
-    ],
-    names,
-    () => '1h30m · 15:40',
-  )
-  expect(svg).toContain('class="b"')
-  expect(svg).toContain('class="warning"')
-  expect(svg).toContain('class="error"')
-  expect(svg).toContain('1h30m · 15:40')
-  expect(svg).toContain('&lt;x&gt;')
-  expect(svg).not.toContain('<x>')
+test('track: neutral under 70%, warning and error above', async () => {
+  const t = (percentUsed: number) => trackSvg({ kind: 'a', percentUsed })
+  expect(t(8)).toContain('class="b"')
+  expect(t(75)).toContain('class="warning"')
+  expect(t(95)).toContain('class="error"')
+  expect(t(0)).not.toContain('class="b"')
 })
 
 test('cache cell: minutes left, yellow near the end of the TTL, red once expired', async () => {
@@ -51,11 +40,8 @@ test('cache cell: minutes left, yellow near the end of the TTL, red once expired
   expect([ring(0), ring(0.1), ring(0.5), ring(0.7), ring(1)].join('')).toBe('○◔◑◕●')
   expect(cacheCell({ at }, H, at).detail).toBeUndefined()
   expect(kTokens(1_250_000)).toBe('1.3M')
-  const svg = usageSvg([], {}, () => '', at, { label: 'cache', remaining: 0.5, value: '42m', detail: '148k', tone: 'warning' })
-  expect(svg).toContain('class="p warning"')
-  expect(svg).toContain('class="r r-warning"')
-  expect(usageSvg([], {}, () => '', at, { label: 'cache', remaining: 0, value: 'expired', tone: 'error' })).not.toContain('class="r ')
-  expect(svg).toContain('· 148k')
+  expect(ringSvg({ label: 'cache', remaining: 0.5, value: '42m', tone: 'warning' })).toContain('class="r r-warning"')
+  expect(ringSvg({ label: 'cache', remaining: 0, value: 'expired', tone: 'error' })).not.toContain('class="r ')
 })
 
 test('the main conversation turn starts the cache countdown; a subagent turn does not', async ($, on) => {
@@ -95,21 +81,6 @@ test('the main conversation turn starts the cache countdown; a subagent turn doe
   await ui.unmount()
 })
 
-test('svg row: a row too long for its width cuts the last reset, not the cache', async () => {
-  const names = { a: '5h', b: 'weekly' }
-  const long = 'x'.repeat(200)
-  const svg = usageSvg(
-    [{ kind: 'a', percentUsed: 8, resetsAt: 'r' }, { kind: 'b', percentUsed: 75, resetsAt: 'r' }],
-    names,
-    () => long,
-    undefined,
-    { label: 'cache', remaining: 0.5, value: '42m', detail: '148k' },
-  )
-  expect(svg).toContain('…')
-  expect(svg).toContain('· 148k')
-  expect(svg.split(long).length).toBe(2) // the first reset stays whole
-})
-
 test('pace tick: share of the window gone by, none outside it or for unknown windows', async () => {
   const now = Date.parse('2026-10-22T10:00:00Z')
   const l = (kind: string, resetsAt?: string) => ({ kind, percentUsed: 50, resetsAt })
@@ -118,9 +89,8 @@ test('pace tick: share of the window gone by, none outside it or for unknown win
   expect(elapsed(l('five_hour', '2026-10-22T09:00:00Z'), now)).toBeUndefined()
   expect(elapsed(l('five_hour'), now)).toBeUndefined()
   expect(elapsed(l('other', '2026-10-22T11:00:00Z'), now)).toBeUndefined()
-  const names = { five_hour: '5h' }
-  expect(usageSvg([l('five_hour', '2026-10-22T11:00:00Z')], names, () => 'r', now)).toContain('class="k"')
-  expect(usageSvg([l('five_hour', '2026-10-22T11:00:00Z')], names, () => 'r')).not.toContain('class="k"')
+  expect(trackSvg(l('five_hour', '2026-10-22T11:00:00Z'), now)).toContain('class="k"')
+  expect(trackSvg(l('five_hour', '2026-10-22T11:00:00Z'))).not.toContain('class="k"')
 })
 
 test('the band shows both windows under the bands beneath', async ($, on) => {
@@ -148,9 +118,11 @@ test('the band shows both windows under the bands beneath', async ($, on) => {
       props: { hasSurvey: false, isWorking: false, bodyColumns: 100 } as any,
     })
     if (surface === 'desktop') {
-      const svg = await ui.find({ type: 'Svg' })
-      expect(svg?.props.alt).toBe('5h 42%, weekly 91%')
-      expect(String(svg?.props.source)).toContain('class="error"')
+      // Words are Text the app lays out and wraps; only the tracks are drawings.
+      expect(await ui.find({ type: 'Text', text: '42%' })).toBeTruthy()
+      const tracks = await ui.findAll({ type: 'Svg' })
+      expect(tracks.map(t => t.props.alt)).toEqual(['42%', '91%'])
+      expect(String(tracks[1].props.source)).toContain('class="error"')
     } else {
       expect((await ui.find({ type: 'Text', text: /^5h/ }))?.text).toMatch(/42%/)
       expect((await ui.find({ type: 'Text', text: /^weekly/ }))?.text).toMatch(/91%/)

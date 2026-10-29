@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Cache, Limit } from '../types'
-import { type CacheCell, tone, usageSvg } from './svg'
+import { type CacheCell, ringSvg, tone, trackSvg } from './svg'
 
 const limits = atom({ plugin: 'usage-limits', key: 'limits' } as const, [] as Limit[])
 // When the main conversation last called the API, and how much context it sent: per session, like the cache itself.
@@ -177,13 +177,32 @@ export const register: Register = on => {
 
     const { Box, Text } = $.ui.resolve(e)
     const Svg = e.surface === 'desktop' ? $.ui.resolve(e).Svg : undefined
-    // Text glyphs break in the desktop's proportional font: draw the row as an SVG there, like ponytail's metrics.
+    // Block glyphs break in the desktop's proportional font: there only the track and ring are drawings, the words stay Text
+    // so the app sizes them and wraps whole columns onto a second line in a narrow window, as it does its own rows.
     const mine =
       Svg ? (
-        <Svg
-          source={usageSvg(ls, NAMES, iso => resetText(iso, now, lang), now, cc)}
-          alt={[...ls.map(l => `${NAMES[l.kind]} ${l.percentUsed}%`), ...(cc ? [`${cc.label} ${cc.value}`] : [])].join(', ')}
-        />
+        <Box flexDirection="row" flexWrap="wrap" alignItems="center" gap={3}>
+          {ls.map(l => (
+            <Box key={l.kind} flexDirection="row" alignItems="center" gap={1}>
+              <Text size="footnote" dimColor>{NAMES[l.kind]}</Text>
+              <Svg source={trackSvg(l, now)} alt={`${l.percentUsed}%`} />
+              <Text size="footnote" weight="semibold" color={tone(l.percentUsed)}>
+                {l.percentUsed}%
+              </Text>
+              {l.resetsAt ? <Text size="footnote" dimColor>{resetText(l.resetsAt, now, lang)}</Text> : null}
+            </Box>
+          ))}
+          {cc ? (
+            <Box key="cache" flexDirection="row" alignItems="center" gap={1}>
+              <Svg source={ringSvg(cc)} alt={`${cc.label} ${cc.value}`} />
+              <Text size="footnote" dimColor>{cc.label}</Text>
+              <Text size="footnote" weight="semibold" color={cc.tone}>
+                {cc.value}
+              </Text>
+              {cc.detail ? <Text size="footnote" dimColor>· {cc.detail}</Text> : null}
+            </Box>
+          ) : null}
+        </Box>
       ) : (
         <Box flexDirection="row" gap={3} width={e.props.bodyColumns}>
           {ls.map(l => (

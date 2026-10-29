@@ -181,7 +181,7 @@ export const register: Register = on => {
     // so the app sizes them and wraps whole columns onto a second line in a narrow window, as it does its own rows.
     const mine =
       Svg ? (
-        <Box flexDirection="row" flexWrap="wrap" alignItems="center" gap={3}>
+        <Box flexDirection="row" flexWrap="wrap" alignItems="center" columnGap={3} rowGap={0}>
           {ls.map(l => (
             <Box key={l.kind} flexDirection="row" alignItems="center" gap={1}>
               <Text size="footnote" dimColor>{NAMES[l.kind]}</Text>

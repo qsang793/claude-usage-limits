@@ -1,8 +1,8 @@
 import type { Limit } from '../types'
 
-// Same palette as ponytail's metricsSvg, so the two rows read as one band.
+// Same palette as ponytail's metricsSvg, so the two rows read as one band; the ring's arc takes the text color like the pace tick.
 // shortcut: copied from ponytail/hooks/band/metrics.ts, not imported; resync if ponytail changes its palette.
-const STYLE = `.t{fill:#87867f;fill-opacity:.3}.b{fill:#87867f}.k{fill:#1f1e1d;fill-opacity:.55}.r{fill:none;stroke:#87867f;stroke-width:2}.rt{fill:none;stroke:#87867f;stroke-opacity:.3;stroke-width:2}.r-warning{stroke:#a86400}.r-error{stroke:#c62828}.warning{fill:#a86400}.error{fill:#c62828}@media (prefers-color-scheme:dark){.k{fill:#ecebe6}.warning{fill:#e3a03d}.error{fill:#ef6a5a}.r-warning{stroke:#e3a03d}.r-error{stroke:#ef6a5a}}`
+const STYLE = `.t{fill:#87867f;fill-opacity:.3}.b{fill:#87867f}.k{fill:#1f1e1d;fill-opacity:.55}.r{fill:none;stroke:#1f1e1d;stroke-width:2}.rt{fill:none;stroke:#87867f;stroke-opacity:.3;stroke-width:2}.r-warning{stroke:#a86400}.r-error{stroke:#c62828}.warning{fill:#a86400}.error{fill:#c62828}@media (prefers-color-scheme:dark){.k{fill:#ecebe6}.r{stroke:#ecebe6}.warning{fill:#e3a03d}.error{fill:#ef6a5a}.r-warning{stroke:#e3a03d}.r-error{stroke:#ef6a5a}}`
 
 export const tone = (pct: number) => (pct >= 90 ? 'error' : pct >= 70 ? 'warning' : undefined)
 

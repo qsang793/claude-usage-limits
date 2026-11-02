@@ -190,7 +190,7 @@ export const register: Register = on => {
     // so the app sizes them and wraps whole columns onto a second line in a narrow window, as it does its own rows.
     const mine =
       Svg ? (
-        <Box flexDirection="row" flexWrap="wrap" alignItems="center" columnGap={3} rowGap={0}>
+        <Box flexDirection="row" flexWrap="wrap" justifyContent="space-evenly" alignItems="center" columnGap={3} rowGap={0} width="100%">
           {ls.map(l => (
             <Box key={l.kind} flexDirection="row" alignItems="center" gap={1}>
               <Text size="footnote" dimColor>{NAMES[l.kind]}</Text>
@@ -213,7 +213,7 @@ export const register: Register = on => {
           ) : null}
         </Box>
       ) : (
-        <Box flexDirection="row" gap={3} width={e.props.bodyColumns}>
+        <Box flexDirection="row" flexWrap="wrap" justifyContent="space-evenly" columnGap={3} width={e.props.bodyColumns}>
           {ls.map(l => (
             <Text key={l.kind}>
               <Text dimColor>{NAMES[l.kind]} </Text>

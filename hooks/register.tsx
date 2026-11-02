@@ -191,7 +191,7 @@ export const register: Register = on => {
     // so the app sizes them and wraps whole columns onto a second line in a narrow window, as it does its own rows.
     const mine =
       Svg ? (
-        <Box flexDirection="row" flexWrap="wrap" justifyContent="space-evenly" alignItems="center" columnGap={3} rowGap={0} width="100%">
+        <Box flexDirection="row" flexWrap="wrap" justifyContent="space-evenly" alignItems="center" columnGap={3} rowGap={1} width="100%">
           {ls.map(l => (
             <Box key={l.kind} flexDirection="row" alignItems="center" gap={1}>
               <Text size="footnote" dimColor>{NAMES[l.kind]}</Text>
@@ -236,9 +236,9 @@ export const register: Register = on => {
           ) : null}
         </Box>
       )
-    // No gap: `below` is truthy even when it draws nothing, and a gap would then leave empty space under the row.
+    // Desktop only, where a cell is 8px: in a terminal it would be a whole blank row. None above the engine's own node, which draws nothing here.
     return below ? (
-      <Box flexDirection="column">
+      <Box flexDirection="column" gap={Svg && below.type !== 'engine' ? 1 : 0}>
         {mine}
         {below}
       </Box>

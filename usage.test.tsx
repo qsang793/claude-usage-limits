@@ -147,10 +147,32 @@ test('the band shows both windows under the bands beneath', async ($, on) => {
       expect((await ui.find({ type: 'Text', text: /^Weekly/ }))?.text).toMatch(/91%/)
     }
     expect(await ui.find({ type: 'Text', text: /ponytail/ })).toBeTruthy()
-    // What sits below may draw nothing: no gap of ours may leave empty space under the row.
-    expect((await ui.findAll({ type: 'Box' })).filter(b => b.props.flexDirection === 'column' && b.props.gap)).toEqual([])
+    // A band below keeps its distance on desktop; in a terminal that would be a blank row.
+    expect((await ui.findAll({ type: 'Box' })).find(b => b.props.flexDirection === 'column')?.props.gap).toBe(surface === 'desktop' ? 1 : 0)
     await ui.unmount()
   }
+})
+
+test('with no band below, no gap leaves empty space under the row', async ($, on) => {
+  on('session.authorize', () => ({ value: { handle: 'h1', kind: 'bearer' } }) as any)
+  on('clock.now', () => ({ value: Date.parse('2026-10-22T10:00:00Z') }))
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  // What core answers `next(e)` with when no other band draws.
+  on('ui.render', () => ({ type: 'engine', ref: 1 }) as any)
+  await $.session.measure({
+    context: { window: 200000 },
+    rateLimits: [{ kind: 'five_hour', percentUsed: 42, resetsAt: '2026-10-22T12:13:00Z' }],
+    changed: ['rateLimits'],
+  } as any)
+  const ui = await $.ui.mount({
+    plugin: 'usage-limits',
+    component: 'AbovePrompt',
+    surface: 'desktop',
+    props: { hasSurvey: false, isWorking: false, bodyColumns: 100 } as any,
+  })
+  expect(await ui.find({ type: 'Text', text: '42%' })).toBeTruthy()
+  for (const b of await ui.findAll({ type: 'Box' })) if (b.props.flexDirection === 'column') expect(b.props.gap).toBeFalsy()
+  await ui.unmount()
 })
 
 test('a new session shows the last reading until its reset passes', async ($, on) => {

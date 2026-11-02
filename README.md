@@ -42,18 +42,18 @@ Requires Claude Code 2.1.304 or newer.
 In a terminal:
 
 ```
-5h █░░░░░░░░░ 9% · Nov 1, 01:00 · 2h26m   weekly █░░░░░░░░░ 12% · Nov 5, 21:00 · 4d22h   ● cache 60m · 44k
+5h █░░░░░░░░░ 9% · Nov 1, 01:00 · 2h26m   Weekly █░░░░░░░░░ 12% · Nov 5, 21:00 · 4d22h   ● Cache 60m · 44k
 ```
 
 | Part | Meaning |
 | --- | --- |
-| `█░░░` bar | How much of the window you have used. Yellow at 70%, red at 90%. |
+| `█░░░` bar | How much of the window you have used. Yellow from 25% once you are at or ahead of an even pace, so the window would run out before its reset (at 70% if the reset time is unknown). Red at 90%. |
 | `Nov 1, 01:00 · 2h26m` | When it resets, with the date when that is not today, then how long until then. |
 | `●` ring | The share of this conversation's prompt cache lifetime that is left. It empties as the cache runs out. |
 | `60m` | Minutes until the cache expires, counted from its last reply. Yellow in the last 10 minutes (the last minute of a 5-minute cache), then `expired` in red. |
 | `44k` | The context the next message would have to process again once the cache has expired. |
 
-In the desktop app the row is drawn as SVG and each track also has a tick marking how much of the window has gone by. A bar past its tick is using the window faster than an even pace. This illustration uses sample values, on pace and then near the limit:
+In the desktop app the row is drawn as SVG and each track also has a tick marking how much of the window has gone by. A bar past its tick is using the window faster than an even pace, which is what turns it yellow. This illustration uses sample values, on pace and then near the limit:
 
 <p align="center"><img src="assets/demo.svg" width="360" alt="Illustration of the desktop row with sample values, on pace and then near the limit with the cache expired"></p>
 
@@ -70,7 +70,7 @@ Asking after the cache expires costs that whole context again, so it is the mome
 - **Instant in a new session.** A new session shows the last known reading right away (the engine only learns the limits after the first reply); a window whose reset time has passed is hidden until the next reading.
 - **Follows the login.** A `/login` during a session counts from the next poll, so after switching subscription accounts the row can show the previous account's numbers for about 2 minutes, or longer if the usage endpoint is unreachable.
 - **Desktop and terminal.** A crisp SVG row in the Claude desktop app, a text bar in a terminal.
-- **Localized.** On macOS the dates and the cache column's words follow the Claude desktop app's language (Settings → Language), for example `bộ đệm` and `hết hạn` in Vietnamese; elsewhere they are in English.
+- **Localized.** On macOS the dates and the cache column's words follow the Claude desktop app's language (Settings → Language), for example `Bộ đệm` and `hết hạn` in Vietnamese; elsewhere they are in English.
 - **Keeps other bands.** It sits above other bands in the same slot (for example the ponytail band) instead of replacing them.
 
 ## Privacy

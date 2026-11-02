@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import { bar, cacheCell, fromOauth, kTokens, resetText, ring } from './hooks/register'
-import { elapsed, ringSvg, trackSvg } from './hooks/svg'
+import { elapsed, ringSvg, tone, trackSvg } from './hooks/svg'
 
 test('bar and reset text', async () => {
   expect(bar(42)).toBe('████░░░░░░')
@@ -25,14 +25,31 @@ test('track: neutral under 70%, warning and error above', async () => {
   expect(t(0)).not.toContain('class="b"')
 })
 
+test('tone follows the pace: yellow at the tick from 25% used, red from 90%, the fixed rule without a reset', async () => {
+  expect(tone(52, 0.39)).toBe('warning')
+  expect(tone(80, 0.95)).toBeUndefined()
+  expect(tone(90, 0.95)).toBe('error')
+  expect(tone(50, 0.5)).toBe('warning')
+  // A window's first messages always look fast.
+  expect(tone(24, 0.01)).toBeUndefined()
+  expect(tone(25, 0.01)).toBe('warning')
+  expect(tone(69)).toBeUndefined()
+  expect(tone(70)).toBe('warning')
+  const now = Date.parse('2026-10-22T10:00:00Z')
+  const track = (percentUsed: number, minsLeft: number) =>
+    trackSvg({ kind: 'five_hour', percentUsed, resetsAt: new Date(now + minsLeft * 60_000).toISOString() }, now)
+  expect(track(52, 182)).toContain('class="warning"')
+  expect(track(80, 15)).toContain('class="b"')
+})
+
 test('cache cell: minutes left, yellow near the end of the TTL, red once expired', async () => {
   const at = Date.parse('2026-10-22T10:00:00Z')
   const H = 3_600_000
   const c = { at, tokens: 148_400 }
-  expect(cacheCell(c, H, at + 18 * 60_000)).toEqual({ label: 'cache', remaining: 0.7, value: '42m', detail: '148k', tone: undefined })
+  expect(cacheCell(c, H, at + 18 * 60_000)).toEqual({ label: 'Cache', remaining: 0.7, value: '42m', detail: '148k', tone: undefined })
   expect(cacheCell(c, H, at + 50 * 60_000 + 1).tone).toBe('warning')
-  expect(cacheCell(c, H, at + H)).toEqual({ label: 'cache', remaining: 0, value: 'expired', detail: '148k', tone: 'error' })
-  expect(cacheCell(c, H, at + H, 'vi-VN')).toMatchObject({ label: 'bộ đệm', value: 'hết hạn' })
+  expect(cacheCell(c, H, at + H)).toEqual({ label: 'Cache', remaining: 0, value: 'expired', detail: '148k', tone: 'error' })
+  expect(cacheCell(c, H, at + H, 'vi-VN')).toMatchObject({ label: 'Bộ đệm', value: 'hết hạn' })
   // A 5-minute TTL warns in its last minute only.
   expect(cacheCell(c, 300_000, at + 3 * 60_000).tone).toBeUndefined()
   const last = cacheCell(c, 300_000, at + 4 * 60_000 + 1)
@@ -72,13 +89,13 @@ test('the main conversation turn starts the cache countdown; a subagent turn doe
 
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 's', agentId: 'sub', reason: 'answer', usage } as any)
   let ui = await mount()
-  expect(await ui.find({ type: 'Text', text: /cache/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /Cache/ })).toBeUndefined()
   await ui.unmount()
 
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer', usage } as any)
   await clock.advance(18 * 60_000)
   ui = await mount()
-  expect((await ui.find({ type: 'Text', text: /cache/ }))?.text).toBe('◕ cache 42m · 148k')
+  expect((await ui.find({ type: 'Text', text: /Cache/ }))?.text).toBe('◕ Cache 42m · 148k')
   await ui.unmount()
 })
 
@@ -127,9 +144,11 @@ test('the band shows both windows under the bands beneath', async ($, on) => {
       expect(String(tracks[1].props.source)).toContain('class="error"')
     } else {
       expect((await ui.find({ type: 'Text', text: /^5h/ }))?.text).toMatch(/42%/)
-      expect((await ui.find({ type: 'Text', text: /^weekly/ }))?.text).toMatch(/91%/)
+      expect((await ui.find({ type: 'Text', text: /^Weekly/ }))?.text).toMatch(/91%/)
     }
     expect(await ui.find({ type: 'Text', text: /ponytail/ })).toBeTruthy()
+    // What sits below may draw nothing: no gap of ours may leave empty space under the row.
+    expect((await ui.findAll({ type: 'Box' })).filter(b => b.props.flexDirection === 'column' && b.props.gap)).toEqual([])
     await ui.unmount()
   }
 })
@@ -159,7 +178,7 @@ test('a new session shows the last reading until its reset passes', async ($, on
     surface: 'terminal',
     props: { hasSurvey: false, isWorking: false, bodyColumns: 100 } as any,
   })
-  expect((await ui.find({ type: 'Text', text: /^weekly/ }))?.text).toMatch(/9%/)
+  expect((await ui.find({ type: 'Text', text: /^Weekly/ }))?.text).toMatch(/9%/)
   // 5h reset at 12:13, it is 13:00 now: hidden.
   expect(await ui.find({ type: 'Text', text: /^5h/ })).toBeUndefined()
   await ui.unmount()
@@ -209,7 +228,7 @@ test('a new session polls the account endpoint with its own credential', async (
     props: { hasSurvey: false, isWorking: false, bodyColumns: 100 } as any,
   })
   expect((await ui.find({ type: 'Text', text: /^5h/ }))?.text).toMatch(/12%/)
-  expect((await ui.find({ type: 'Text', text: /^weekly/ }))?.text).toMatch(/3%/)
+  expect((await ui.find({ type: 'Text', text: /^Weekly/ }))?.text).toMatch(/3%/)
   await ui.unmount()
 
   await clock.advance(60_000) // two minutes in: the next poll
@@ -242,7 +261,7 @@ test('only a subscription login shows the stored reading, and a poll notices a s
   })
   const weekly = async () => {
     const ui = await mountBand($)
-    const row = await ui.find({ type: 'Text', text: /^weekly/ })
+    const row = await ui.find({ type: 'Text', text: /^Weekly/ })
     expect(await ui.find({ type: 'Text', text: /below/ })).toBeTruthy()
     await ui.unmount()
     return row
@@ -286,7 +305,7 @@ test('the cache TTL is read from CLAUDE_CONFIG_DIR when set', async ($, on) => {
     return { value: JSON.stringify({ promptCacheTtl: '5m' }) } as any
   })
   const ui = await warmBand($, on)
-  expect(await ui.find({ type: 'Text', text: /cache 5m/ })).toBeTruthy()
+  expect(await ui.find({ type: 'Text', text: /Cache 5m/ })).toBeTruthy()
   await ui.unmount()
 })
 
@@ -295,8 +314,8 @@ test('a failing env.get keeps the row', async ($, on) => {
     throw new Error('env down')
   })
   const ui = await warmBand($, on)
-  expect((await ui.find({ type: 'Text', text: /^weekly/ }))?.text).toMatch(/9%/)
-  expect(await ui.find({ type: 'Text', text: /cache 60m/ })).toBeTruthy()
+  expect((await ui.find({ type: 'Text', text: /^Weekly/ }))?.text).toMatch(/9%/)
+  expect(await ui.find({ type: 'Text', text: /Cache 60m/ })).toBeTruthy()
   await ui.unmount()
 })
 
@@ -304,7 +323,7 @@ test('a malformed app locale falls back to en-US instead of hiding the row', asy
   on('env.get', (_, e: any) => ({ value: e.name === 'HOME' ? '/home' : undefined }) as any)
   on('fs.read', () => ({ value: JSON.stringify({ locale: 'vi_VN' }) }) as any)
   const ui = await warmBand($, on)
-  expect((await ui.find({ type: 'Text', text: /^weekly/ }))?.text).toMatch(/Oct 25, /)
+  expect((await ui.find({ type: 'Text', text: /^Weekly/ }))?.text).toMatch(/Oct 25, /)
   await ui.unmount()
 })
 

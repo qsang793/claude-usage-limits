@@ -2,19 +2,19 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Cache, Limit } from '../types'
-import { type CacheCell, ringSvg, tone, trackSvg } from './svg'
+import { type CacheCell, elapsed, ringSvg, tone, trackSvg } from './svg'
 
 const limits = atom({ plugin: 'usage-limits', key: 'limits' } as const, [] as Limit[])
 // When the main conversation last called the API, and how much context it sent: per session, like the cache itself.
 const cache = atom({ plugin: 'usage-limits', key: 'cache' } as const, null as Cache | null)
 
-const NAMES: Record<string, string> = { five_hour: '5h', seven_day: 'weekly' }
+const NAMES: Record<string, string> = { five_hour: '5h', seven_day: 'Weekly' }
 const pad = (n: number) => String(n).padStart(2, '0')
 
 // The cache column's words; dates come from Intl in the app's locale.
 type Words = { cache: string; expired: string }
-const EN: Words = { cache: 'cache', expired: 'expired' }
-const WORDS: Record<string, Words> = { en: EN, vi: { cache: 'bộ đệm', expired: 'hết hạn' } }
+const EN: Words = { cache: 'Cache', expired: 'expired' }
+const WORDS: Record<string, Words> = { en: EN, vi: { cache: 'Bộ đệm', expired: 'hết hạn' } }
 
 const MIN = 60_000
 const HOUR = 60 * MIN
@@ -186,6 +186,7 @@ export const register: Register = on => {
 
     const { Box, Text } = $.ui.resolve(e)
     const Svg = e.surface === 'desktop' ? $.ui.resolve(e).Svg : undefined
+    const toneOf = (l: Limit) => tone(l.percentUsed, elapsed(l, now))
     // Block glyphs break in the desktop's proportional font: there only the track and ring are drawings, the words stay Text
     // so the app sizes them and wraps whole columns onto a second line in a narrow window, as it does its own rows.
     const mine =
@@ -195,7 +196,7 @@ export const register: Register = on => {
             <Box key={l.kind} flexDirection="row" alignItems="center" gap={1}>
               <Text size="footnote" dimColor>{NAMES[l.kind]}</Text>
               <Svg source={trackSvg(l, now)} alt={`${l.percentUsed}%`} />
-              <Text size="footnote" weight="semibold" color={tone(l.percentUsed)}>
+              <Text size="footnote" weight="semibold" color={toneOf(l)}>
                 {l.percentUsed}%
               </Text>
               {l.resetsAt ? <Text size="footnote" dimColor>{resetText(l.resetsAt, now, lang)}</Text> : null}
@@ -217,7 +218,7 @@ export const register: Register = on => {
           {ls.map(l => (
             <Text key={l.kind}>
               <Text dimColor>{NAMES[l.kind]} </Text>
-              <Text color={tone(l.percentUsed)} dimColor={tone(l.percentUsed) === undefined}>
+              <Text color={toneOf(l)} dimColor={toneOf(l) === undefined}>
                 {bar(l.percentUsed)}
               </Text>{' '}
               {l.percentUsed}%{l.resetsAt ? <Text dimColor> · {resetText(l.resetsAt, now, lang)}</Text> : null}
@@ -235,8 +236,9 @@ export const register: Register = on => {
           ) : null}
         </Box>
       )
+    // No gap: `below` is truthy even when it draws nothing, and a gap would then leave empty space under the row.
     return below ? (
-      <Box flexDirection="column" gap={1}>
+      <Box flexDirection="column">
         {mine}
         {below}
       </Box>

@@ -20,16 +20,17 @@ const MIN = 60_000
 const HOUR = 60 * MIN
 
 // The main conversation's cache TTL, in the order Claude Code applies its controls; a subscription within plan usage gets 1h.
-// shortcut: user settings only (not project or managed ones), and a subscription's drop to 5m on usage credits is missed; read it from the engine if it ever exposes one.
+// shortcut: the user's settings file only (not project or managed ones), and a subscription's drop to 5m on usage credits is missed; read it from the engine if it ever exposes one.
 let ttl: Promise<number> | undefined
 const cacheTtl = ($: EngineInterface) =>
   (ttl ??= (async () => {
     const pick = (v: unknown) => (v === '5m' ? 5 * MIN : v === '1h' ? HOUR : undefined)
-    if ((await $.env.get('FORCE_PROMPT_CACHING_5M')) === '1') return 5 * MIN
-    const fromEnv = pick(await $.env.get('CLAUDE_CODE_PROMPT_CACHE_TTL'))
-    if (fromEnv) return fromEnv
     try {
-      const settings = JSON.parse(await $.fs.read(`${await $.env.get('HOME')}/.claude/settings.json`))
+      if ((await $.env.get('FORCE_PROMPT_CACHING_5M')) === '1') return 5 * MIN
+      const fromEnv = pick(await $.env.get('CLAUDE_CODE_PROMPT_CACHE_TTL'))
+      if (fromEnv) return fromEnv
+      const dir = (await $.env.get('CLAUDE_CONFIG_DIR')) || `${await $.env.get('HOME')}/.claude`
+      const settings = JSON.parse(await $.fs.read(`${dir}/settings.json`))
       return pick(settings.promptCacheTtl) ?? HOUR
     } catch {
       return HOUR
@@ -62,7 +63,8 @@ const appLocale = ($: EngineInterface) =>
   (locale ??= (async () => {
     try {
       const config = JSON.parse(await $.fs.read(`${await $.env.get('HOME')}/Library/Application Support/Claude/config.json`))
-      return typeof config.locale === 'string' ? config.locale : 'en-US'
+      // Throws on a missing or malformed tag, which Intl.DateTimeFormat would refuse while drawing.
+      return new Intl.Locale(config.locale).toString()
     } catch {
       return 'en-US'
     }
@@ -108,11 +110,20 @@ export const fromOauth = (body: unknown): Limit[] =>
     return [{ kind, percentUsed: Math.round(w.utilization * 10) / 10, resetsAt }]
   })
 
+// Only a subscription login has limits; asked again at each poll, so a /login mid-session counts.
+// shortcut: the store is not tied to an account, so a switch shows the old reading until a fetch succeeds or its reset passes; key it by account if $.session.identity ever answers unmanaged mods.
+let login: ReturnType<EngineInterface['session']['authorize']> | undefined
+const askLogin = ($: EngineInterface) => (login = $.session.authorize().catch(() => null))
+
 let polling = false
 const poll = async ($: EngineInterface) => {
+  // The engine sets the session's own credential header; the token never reaches this module.
+  const auth = await askLogin($)
+  if (auth?.kind !== 'bearer') return
   const now = await $.clock.now()
   // One fetch per period across all sessions; the others take what it stored.
-  if (polling || now - (((await $.store.get('fetchedAt')) as number | undefined) ?? 0) < POLL_MS) {
+  // The grace keeps a timer firing a moment early from skipping its fetch and waiting a whole extra period.
+  if (polling || now - (((await $.store.get('fetchedAt')) as number | undefined) ?? 0) < POLL_MS - 5_000) {
     const shared = (await $.store.get('limits')) as Limit[] | undefined
     if (shared?.length) await update($, limits, () => shared)
     return
@@ -120,9 +131,6 @@ const poll = async ($: EngineInterface) => {
   polling = true
   try {
     await $.store.set('fetchedAt', now)
-    // The engine sets the session's own credential header; the token never reaches this module.
-    const auth = await $.session.authorize()
-    if (auth?.kind !== 'bearer') return
     const r = await $.http.fetch(USAGE_URL, { auth: auth.handle, headers: { 'anthropic-beta': 'oauth-2025-04-20' } })
     const ls = r.ok ? fromOauth(JSON.parse(r.text)) : []
     if (ls.length > 0) await save($, ls)
@@ -164,6 +172,7 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const below = await next(e)
+    if ((await (login ?? askLogin($)))?.kind !== 'bearer') return below
     const now = await $.clock.now()
     // A remembered window whose reset has passed no longer says anything true: hide it until the next reading.
     // Before this session's first reading, the last one kept across sessions: drawn from the first frame, whatever session.start did.

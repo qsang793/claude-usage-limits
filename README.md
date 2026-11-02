@@ -61,13 +61,14 @@ Asking after the cache expires costs that whole context again, so it is the mome
 
 ### The cache countdown
 
-- The TTL is the one Claude Code picks: 1 hour on a subscription, unless `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL` or `promptCacheTtl` in `~/.claude/settings.json` say otherwise.
+- The TTL is the one Claude Code picks: 1 hour on a subscription, unless `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL` or `promptCacheTtl` in `settings.json` under `CLAUDE_CONFIG_DIR` (`~/.claude` by default) say otherwise.
 - Subagents' own caches are not counted, and the column appears after the conversation's first reply.
 
 ### How it behaves
 
 - **Account-wide, refreshed while idle.** Every 2 minutes the mod asks Anthropic's usage endpoint (the one the app's own "Plan usage limits" panel reflects), once for all your open sessions, and after each reply it also takes the engine's own reading.
 - **Instant in a new session.** A new session shows the last known reading right away (the engine only learns the limits after the first reply); a window whose reset time has passed is hidden until the next reading.
+- **Follows the login.** A `/login` during a session counts from the next poll, so after switching subscription accounts the row can show the previous account's numbers for about 2 minutes, or longer if the usage endpoint is unreachable.
 - **Desktop and terminal.** A crisp SVG row in the Claude desktop app, a text bar in a terminal.
 - **Localized.** On macOS the dates and the cache column's words follow the Claude desktop app's language (Settings → Language), for example `bộ đệm` and `hết hạn` in Vietnamese; elsewhere they are in English.
 - **Keeps other bands.** It sits above other bands in the same slot (for example the ponytail band) instead of replacing them.

@@ -45,6 +45,7 @@ test('cache cell: minutes left, yellow near the end of the TTL, red once expired
 })
 
 test('the main conversation turn starts the cache countdown; a subagent turn does not', async ($, on) => {
+  on('session.authorize', () => ({ value: { handle: 'h1', kind: 'bearer' } }) as any)
   const clock = mock.clock(on, { now: Date.parse('2026-10-22T10:00:00Z') })
   mock.store(on)
   on('env.get', (_, e: any) => ({ value: e.name === 'HOME' ? '/nohome' : undefined }) as any)
@@ -94,6 +95,7 @@ test('pace tick: share of the window gone by, none outside it or for unknown win
 })
 
 test('the band shows both windows under the bands beneath', async ($, on) => {
+  on('session.authorize', () => ({ value: { handle: 'h1', kind: 'bearer' } }) as any)
   on('clock.now', () => ({ value: Date.parse('2026-10-22T10:00:00Z') }))
   on('session.measure', (_, e) => ({ changed: e.changed }))
   on('ui.render', ($, e) => {
@@ -133,6 +135,7 @@ test('the band shows both windows under the bands beneath', async ($, on) => {
 })
 
 test('a new session shows the last reading until its reset passes', async ($, on) => {
+  on('session.authorize', () => ({ value: { handle: 'h1', kind: 'bearer' } }) as any)
   let rateLimits: unknown[] = [
     { kind: 'five_hour', percentUsed: 42, resetsAt: '2026-10-22T12:13:00Z' },
     { kind: 'seven_day', percentUsed: 9, resetsAt: '2026-10-25T14:00:00Z' },
@@ -211,4 +214,113 @@ test('a new session polls the account endpoint with its own credential', async (
 
   await clock.advance(60_000) // two minutes in: the next poll
   expect(asked.length).toBe(2)
+})
+
+const READING = [
+  { kind: 'five_hour', percentUsed: 42, resetsAt: '2026-10-22T12:13:00Z' },
+  { kind: 'seven_day', percentUsed: 9, resetsAt: '2026-10-25T14:00:00Z' },
+]
+const mountBand = ($: any) =>
+  $.ui.mount({
+    plugin: 'usage-limits',
+    component: 'AbovePrompt',
+    surface: 'terminal',
+    props: { hasSurvey: false, isWorking: false, bodyColumns: 100 } as any,
+  })
+
+test('only a subscription login shows the stored reading, and a poll notices a switch', async ($, on) => {
+  let kind: string | null = 'api-key'
+  const clock = mock.clock(on, { now: Date.parse('2026-10-22T10:00:00Z') })
+  mock.store(on, { limits: READING })
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }) as any)
+  on('session.authorize', () => ({ value: kind && { handle: 'h', kind } }) as any)
+  on('http.fetch', () => ({ value: { status: 500, ok: false, headers: {}, text: '' } }) as any)
+  on('ui.render', ($, e) => {
+    const { Text } = $.ui.resolve(e)
+    return <Text>below</Text>
+  })
+  const weekly = async () => {
+    const ui = await mountBand($)
+    const row = await ui.find({ type: 'Text', text: /^weekly/ })
+    expect(await ui.find({ type: 'Text', text: /below/ })).toBeTruthy()
+    await ui.unmount()
+    return row
+  }
+
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await clock.advance(0)
+  expect(await weekly()).toBeUndefined()
+
+  kind = 'bearer' // a /login mid-session
+  await clock.advance(120_000)
+  expect((await weekly())?.text).toMatch(/9%/)
+
+  kind = null // a 3P provider or no login
+  await clock.advance(120_000)
+  expect(await weekly()).toBeUndefined()
+})
+
+// A reading and a main conversation turn, so the row and its cache column are drawn.
+const warmBand = async ($: any, on: any) => {
+  mock.clock(on, { now: Date.parse('2026-10-22T10:00:00Z') })
+  mock.store(on)
+  on('session.authorize', () => ({ value: { handle: 'h', kind: 'bearer' } }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000, tokens: 1000 }, rateLimits: [] } }))
+  on('session.measure', (_: any, e: any) => ({ changed: e.changed }))
+  on('turn.complete', () => ({ text: '' }))
+  on('ui.render', ($: any, e: any) => {
+    const { Text } = $.ui.resolve(e)
+    return <Text>below</Text>
+  })
+  await $.session.measure({ context: { window: 200000 }, rateLimits: READING, changed: ['rateLimits'] })
+  const usage = { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: 'm' }
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer', usage })
+  return mountBand($)
+}
+
+test('the cache TTL is read from CLAUDE_CONFIG_DIR when set', async ($, on) => {
+  on('env.get', (_, e: any) => ({ value: { CLAUDE_CONFIG_DIR: '/cfg', HOME: '/home' }[e.name as string] }) as any)
+  on('fs.read', (_, e: any) => {
+    if (e.path !== '/cfg/settings.json') throw new Error(`unexpected read: ${e.path}`)
+    return { value: JSON.stringify({ promptCacheTtl: '5m' }) } as any
+  })
+  const ui = await warmBand($, on)
+  expect(await ui.find({ type: 'Text', text: /cache 5m/ })).toBeTruthy()
+  await ui.unmount()
+})
+
+test('a failing env.get keeps the row', async ($, on) => {
+  on('env.get', () => {
+    throw new Error('env down')
+  })
+  const ui = await warmBand($, on)
+  expect((await ui.find({ type: 'Text', text: /^weekly/ }))?.text).toMatch(/9%/)
+  expect(await ui.find({ type: 'Text', text: /cache 60m/ })).toBeTruthy()
+  await ui.unmount()
+})
+
+test('a malformed app locale falls back to en-US instead of hiding the row', async ($, on) => {
+  on('env.get', (_, e: any) => ({ value: e.name === 'HOME' ? '/home' : undefined }) as any)
+  on('fs.read', () => ({ value: JSON.stringify({ locale: 'vi_VN' }) }) as any)
+  const ui = await warmBand($, on)
+  expect((await ui.find({ type: 'Text', text: /^weekly/ }))?.text).toMatch(/Oct 25, /)
+  await ui.unmount()
+})
+
+test('a tick just short of the period still polls', async ($, on) => {
+  const now = Date.parse('2026-10-22T10:00:00Z')
+  let fetches = 0
+  const clock = mock.clock(on, { now })
+  mock.store(on, { fetchedAt: now - 119_999 })
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }) as any)
+  on('session.authorize', () => ({ value: { handle: 'h', kind: 'bearer' } }) as any)
+  on('http.fetch', () => {
+    fetches++
+    return { value: { status: 500, ok: false, headers: {}, text: '' } } as any
+  })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await clock.advance(0)
+  expect(fetches).toBe(1)
 })

@@ -83,7 +83,11 @@ The usage endpoint is undocumented. If it is unreachable or changes, the row fal
 
 New versions do not arrive on their own, because auto-update is off by default for third-party marketplaces. To turn it on, run `/plugin` in a session, open the Marketplaces tab, select this marketplace, then Enable auto-update.
 
-To update once instead, select Update now on the plugin in the Installed tab of `/plugin`, or from a shell:
+To update once instead, select this marketplace in the same tab, then Update marketplace. From a shell, refresh the marketplace first, because the second command only compares against the local copy of its listing and otherwise reports the old version as the latest:
+
+```bash
+claude plugin marketplace update usage-limits
+```
 
 ```bash
 claude plugin update usage-limits@usage-limits

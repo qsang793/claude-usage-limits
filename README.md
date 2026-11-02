@@ -79,6 +79,18 @@ The session's own login is used through the engine (`$.session.authorize`): the 
 
 The usage endpoint is undocumented. If it is unreachable or changes, the row falls back to the engine's readings.
 
+## Update
+
+New versions do not arrive on their own, because auto-update is off by default for third-party marketplaces. To turn it on, run `/plugin` in a session, open the Marketplaces tab, select this marketplace, then Enable auto-update.
+
+To update once instead, select Update now on the plugin in the Installed tab of `/plugin`, or from a shell:
+
+```bash
+claude plugin update usage-limits@usage-limits
+```
+
+A session already open keeps the version it loaded until you run `/reload-plugins`; new sessions load the update.
+
 ## Uninstall
 
 ```bash
@@ -100,6 +112,8 @@ ln -s ~/claude-usage-limits ~/.claude/mods/usage-limits
 ```
 
 Sessions started afterwards load the new code; one already open picks it up with `/reload-plugins`.
+
+To release, bump `version` in `.claude-plugin/plugin.json`: installed copies only see an update when that string changes.
 
 ## License
 

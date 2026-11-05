@@ -153,6 +153,52 @@ test('the band shows both windows under the bands beneath', async ($, on) => {
   }
 })
 
+test(
+  'a band drawn above the row gets the same distance on desktop',
+  {
+    plugins: [
+      {
+        name: 'above',
+        tier: 'prepend',
+        register(on) {
+          on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+            const { Box, Text } = $.ui.resolve(e)
+            return (
+              <Box flexDirection="column">
+                <Text>above</Text>
+                {await next(e)}
+              </Box>
+            )
+          })
+        },
+      },
+    ],
+  },
+  async ($, on) => {
+    on('session.authorize', () => ({ value: { handle: 'h1', kind: 'bearer' } }) as any)
+    on('clock.now', () => ({ value: Date.parse('2026-10-22T10:00:00Z') }))
+    on('session.measure', (_, e) => ({ changed: e.changed }))
+    on('ui.render', () => ({ type: 'engine', ref: 1 }) as any)
+    await $.session.measure({
+      context: { window: 200000 },
+      rateLimits: [{ kind: 'five_hour', percentUsed: 42, resetsAt: '2026-10-22T12:13:00Z' }],
+      changed: ['rateLimits'],
+    } as any)
+    for (const surface of ['terminal', 'desktop'] as const) {
+      const ui = await $.ui.mount({
+        plugin: 'usage-limits',
+        component: 'AbovePrompt',
+        surface,
+        props: { hasSurvey: false, isWorking: false, bodyColumns: 100 } as any,
+      })
+      expect(await ui.find({ type: 'Text', text: 'above' })).toBeTruthy()
+      const row = (await ui.findAll({ type: 'Box' })).find(b => b.props.justifyContent === 'space-evenly')
+      expect(row?.props.marginTop ?? 0).toBe(surface === 'desktop' ? 1 : 0)
+      await ui.unmount()
+    }
+  },
+)
+
 test('with no band below, no gap leaves empty space under the row', async ($, on) => {
   on('session.authorize', () => ({ value: { handle: 'h1', kind: 'bearer' } }) as any)
   on('clock.now', () => ({ value: Date.parse('2026-10-22T10:00:00Z') }))
@@ -172,6 +218,7 @@ test('with no band below, no gap leaves empty space under the row', async ($, on
   })
   expect(await ui.find({ type: 'Text', text: '42%' })).toBeTruthy()
   for (const b of await ui.findAll({ type: 'Box' })) if (b.props.flexDirection === 'column') expect(b.props.gap).toBeFalsy()
+  expect((await ui.findAll({ type: 'Box' })).find(b => b.props.justifyContent === 'space-evenly')?.props.marginTop).toBeFalsy()
   await ui.unmount()
 })
 

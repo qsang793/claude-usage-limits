@@ -28,7 +28,7 @@ From a shell:
 claude plugin install usage-limits --marketplace qsang793/claude-usage-limits
 ```
 
-Answer `y` to add the marketplace, then pick the user scope. The row appears in every session started afterwards, including the desktop app's Code tab. A session already open keeps the version it loaded until you run `/reload-plugins` in it (the desktop app too); the numbers still refresh there meanwhile.
+This adds the marketplace and installs the plugin for your user, with no questions. The row appears in every session started afterwards, including the desktop app's Code tab. A session already open keeps the version it loaded until you run `/reload-plugins` in it (the desktop app too); the numbers still refresh there meanwhile.
 
 In the desktop app, where `/plugin` does not run: click + next to the prompt box, then Plugins, Add marketplace with `qsang793/claude-usage-limits`, then Add plugin.
 
@@ -71,7 +71,7 @@ Asking after the cache expires costs that whole context again, so it is the mome
 - **Follows the login.** A `/login` during a session counts from the next poll, so after switching subscription accounts the row can show the previous account's numbers for about 2 minutes, or longer if the usage endpoint is unreachable.
 - **Desktop and terminal.** A crisp SVG row in the Claude desktop app, a text bar in a terminal.
 - **Localized.** On macOS the dates and the cache column's words follow the Claude desktop app's language (Settings → Language), for example `Bộ đệm` and `hết hạn` in Vietnamese; elsewhere they are in English.
-- **Keeps other bands.** It sits above other bands in the same slot (for example the ponytail band) instead of replacing them.
+- **Keeps other bands.** It shares the slot with other bands (for example the ponytail band) instead of replacing them. Which one is on top follows the order Claude Code loads plugins in, so it can differ between machines; in the desktop app they are spaced apart either way.
 
 ## Privacy
 

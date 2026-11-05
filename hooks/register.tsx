@@ -189,9 +189,12 @@ export const register: Register = on => {
     const toneOf = (l: Limit) => tone(l.percentUsed, elapsed(l, now))
     // Block glyphs break in the desktop's proportional font: there only the track and ring are drawings, the words stay Text
     // so the app sizes them and wraps whole columns onto a second line in a narrow window, as it does its own rows.
+    // The link beneath us is one further out than ours: past 1, a hook outer than ours (another band, such as ponytail when installed
+    // before us) draws above the row, and on desktop gets the same distance as a band below.
+    const outer = (next.trace[0]?.index ?? 0) > 1
     const mine =
       Svg ? (
-        <Box flexDirection="row" flexWrap="wrap" justifyContent="space-evenly" alignItems="center" columnGap={3} rowGap={1} width="100%">
+        <Box flexDirection="row" flexWrap="wrap" justifyContent="space-evenly" alignItems="center" columnGap={3} rowGap={1} width="100%" marginTop={outer ? 1 : 0}>
           {ls.map(l => (
             <Box key={l.kind} flexDirection="row" alignItems="center" gap={1}>
               <Text size="footnote" dimColor>{NAMES[l.kind]}</Text>
